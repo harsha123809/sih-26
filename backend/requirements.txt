@@ -1,0 +1,10 @@
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+pydantic==2.9.2
+numpy==1.26.4
+torch==2.4.1
+torchvision==0.19.1
+shapely==2.0.6
+python-multipart==0.0.9
+reportlab==4.2.5
+scipy==1.13.1
