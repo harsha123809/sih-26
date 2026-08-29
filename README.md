@@ -122,21 +122,40 @@ To run the pipeline on actual satellite data:
 
 1. Register free at the [Copernicus Data Space Ecosystem](https://dataspace.copernicus.eu/)
    and download a **Sentinel-1 GRD** product over your area of interest.
-2. Extract the VV (and ideally VH) measurement bands as georeferenced GeoTIFFs.
-   Analysis-ready output from SNAP or pyroSAR works directly; so does a raw
-   GRD measurement TIFF, though without the calibration LUT its absolute
-   backscatter level is not physically meaningful.
-3. In the app, go to **Scenes → Ingest SAR**, attach the bands, and give it the
-   wind speed at acquisition time (from ERA5 or GFS reanalysis).
+2. In the app, go to **Scenes → Ingest SAR**, attach the `.SAFE.zip` exactly as
+   downloaded, and give it the wind speed at acquisition time (from ERA5 or GFS
+   reanalysis).
+
+No unzipping, no SNAP preprocessing, no band hunting: the VV/VH measurement
+rasters are located inside the archive automatically. Individual GeoTIFFs work
+too if you already have them extracted or terrain-corrected.
+
+Raw GRD products are in **radar geometry** — they carry ground control points
+rather than a CRS and affine transform — so their map footprint is derived from
+the GCP hull. That is an approximate outline, fine for placing a scene on a map,
+but not a substitute for real terrain correction if you need per-pixel
+geolocation accuracy. Terrain-corrected products (SNAP, pyroSAR) are used
+directly via their affine transform instead, and the scene description says
+which of the two applied.
+
+Note also that without the product's calibration LUT, backscatter from a raw
+GRD is uncalibrated: relative structure and the VV/VH ratio are meaningful, the
+absolute dB level is not.
 
 Or via the API:
 
 ```
+# a .SAFE.zip straight from Copernicus (VV/VH found inside automatically)
+curl -X POST http://127.0.0.1:8000/api/scenes/ingest-sar \
+  -F "vv_file=@S1A_IW_GRDH_1SDV_20260820T021400_....SAFE.zip" \
+  -F "wind_speed_ms=6.2" \
+  -F "incidence_angle_deg=34.0"
+
+# or individual bands you already extracted
 curl -X POST http://127.0.0.1:8000/api/scenes/ingest-sar \
   -F "vv_file=@S1A_..._vv.tif" \
   -F "vh_file=@S1A_..._vh.tif" \
-  -F "wind_speed_ms=6.2" \
-  -F "incidence_angle_deg=34.0"
+  -F "wind_speed_ms=6.2"
 ```
 
 **Wind speed is required, not optional.** Without it the physics gate cannot

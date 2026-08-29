@@ -14,6 +14,10 @@ export function IngestSarPanel({ onIngested }: { onIngested: (scene: Scene) => v
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // A .SAFE.zip already contains both polarisations, so the separate VH
+  // picker is meaningless there.
+  const isZip = !!vvFile && vvFile.name.toLowerCase().endsWith(".zip");
+
   async function submit() {
     if (!vvFile) return;
     setBusy(true);
@@ -46,8 +50,8 @@ export function IngestSarPanel({ onIngested }: { onIngested: (scene: Scene) => v
         <div>
           <div className="text-sm font-medium text-text-primary">Ingest a real Sentinel-1 product</div>
           <div className="text-xs2 text-text-secondary">
-            Upload a georeferenced GRD GeoTIFF to run the pipeline on measured backscatter
-            instead of a seeded fixture.
+            Drop in a <code className="mono-num">.SAFE.zip</code> from Copernicus (or a GeoTIFF) to
+            run the pipeline on measured backscatter instead of a seeded fixture.
           </div>
         </div>
         <ActionButton variant="primary" onClick={() => setOpen(true)}>
@@ -71,20 +75,21 @@ export function IngestSarPanel({ onIngested }: { onIngested: (scene: Scene) => v
       </div>
 
       <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-        <Field label="VV band (required)">
+        <Field label=".SAFE.zip, or VV band (required)">
           <input
             type="file"
-            accept=".tif,.tiff,.img,.vrt"
+            accept=".zip,.tif,.tiff,.img,.vrt"
             onChange={(e) => setVvFile(e.target.files?.[0] ?? null)}
             className="w-full text-xs2 text-text-secondary file:mr-2 file:rounded-input file:border file:border-border file:bg-elevated file:px-2 file:py-1 file:text-xs2 file:text-text-primary"
           />
         </Field>
-        <Field label="VH band (optional)">
+        <Field label={isZip ? "VH band (not needed for a .zip)" : "VH band (optional)"}>
           <input
             type="file"
             accept=".tif,.tiff,.img,.vrt"
+            disabled={isZip}
             onChange={(e) => setVhFile(e.target.files?.[0] ?? null)}
-            className="w-full text-xs2 text-text-secondary file:mr-2 file:rounded-input file:border file:border-border file:bg-elevated file:px-2 file:py-1 file:text-xs2 file:text-text-primary"
+            className="w-full text-xs2 text-text-secondary disabled:opacity-40 file:mr-2 file:rounded-input file:border file:border-border file:bg-elevated file:px-2 file:py-1 file:text-xs2 file:text-text-primary"
           />
         </Field>
         <Field label="Scene name">
@@ -102,9 +107,12 @@ export function IngestSarPanel({ onIngested }: { onIngested: (scene: Scene) => v
       </div>
 
       <p className="mt-3 text-[10px] leading-relaxed text-text-secondary">
-        Wind speed is mandatory because the physics gate cannot judge whether a detection is
-        trustworthy without it — get it from ERA5 or GFS reanalysis at the acquisition time.
-        Without a VH band there is no VV/VH ratio, so oil type stays UNRESOLVED.
+        Drop in a Sentinel-1 <code className="mono-num">.SAFE.zip</code> exactly as downloaded from
+        Copernicus — the VV and VH measurement bands are found inside automatically. Raw GRD
+        products in radar geometry work too; their footprint is approximated from ground control
+        points. Wind speed is mandatory because the physics gate cannot judge whether a detection
+        is trustworthy without it (use ERA5 or GFS reanalysis at the acquisition time). Without a
+        VH band there is no VV/VH ratio, so oil type stays UNRESOLVED.
       </p>
 
       {error && (

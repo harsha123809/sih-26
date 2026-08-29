@@ -97,8 +97,14 @@ SAR_DATA_DIR = Path(__file__).resolve().parents[2] / "data" / "sar"
 
 @router.post("/scenes/ingest-sar", response_model=Scene)
 async def ingest_sar(
-    vv_file: UploadFile = File(..., description="Sentinel-1 GRD VV band (GeoTIFF)"),
-    vh_file: UploadFile | None = File(None, description="Optional VH band (GeoTIFF)"),
+    vv_file: UploadFile = File(
+        ...,
+        description=(
+            "Either a Sentinel-1 .SAFE.zip straight from Copernicus (VV/VH are "
+            "found inside automatically), or a single VV GeoTIFF."
+        ),
+    ),
+    vh_file: UploadFile | None = File(None, description="Optional VH band (ignored when a .zip is given)"),
     name: str = Form("Ingested SAR Scene"),
     acquisition_time: str | None = Form(None),
     wind_speed_ms: float = Form(...),
@@ -115,7 +121,7 @@ async def ingest_sar(
     ungated detection is exactly what this system exists to avoid producing.
     Get it from ERA5/GFS reanalysis for the acquisition timestamp.
     """
-    from app.core.ml.sentinel1 import load_sar_scene, render_thumbnail
+    from app.core.ml.sentinel1 import extract_safe_zip, load_sar_scene, render_thumbnail
 
     scene_id = f"sar-{uuid.uuid4().hex[:10]}"
     scene_dir = SAR_DATA_DIR / scene_id
@@ -123,15 +129,27 @@ async def ingest_sar(
 
     saved: list[str] = []
     try:
-        vv_path = scene_dir / f"vv{_suffix(vv_file.filename)}"
-        await _save_upload(vv_file, vv_path)
-        saved.append(str(vv_path))
+        primary_name = vv_file.filename or ""
+        if primary_name.lower().endswith(".zip"):
+            # A .SAFE package straight from Copernicus — dig the measurement
+            # bands out rather than making the user do it by hand.
+            zip_path = scene_dir / "product.zip"
+            await _save_upload(vv_file, zip_path)
+            bands = extract_safe_zip(zip_path, scene_dir)
+            zip_path.unlink(missing_ok=True)  # the extracted bands are what we need
+            vv_path = Path(bands["vv"])
+            vh_path = Path(bands["vh"]) if "vh" in bands else None
+            saved = [str(vv_path)] + ([str(vh_path)] if vh_path else [])
+        else:
+            vv_path = scene_dir / f"vv{_suffix(primary_name)}"
+            await _save_upload(vv_file, vv_path)
+            saved.append(str(vv_path))
 
-        vh_path = None
-        if vh_file is not None and vh_file.filename:
-            vh_path = scene_dir / f"vh{_suffix(vh_file.filename)}"
-            await _save_upload(vh_file, vh_path)
-            saved.append(str(vh_path))
+            vh_path = None
+            if vh_file is not None and vh_file.filename:
+                vh_path = scene_dir / f"vh{_suffix(vh_file.filename)}"
+                await _save_upload(vh_file, vh_path)
+                saved.append(str(vh_path))
 
         sar = load_sar_scene(vv_path, vh_path)
     except ValueError as exc:
@@ -149,8 +167,10 @@ async def ingest_sar(
         raise HTTPException(
             status_code=422,
             detail=(
-                "Product has no usable CRS/geotransform, so it cannot be placed on "
-                "the map. Use a georeferenced (terrain-corrected) GRD product."
+                "This product carries neither a CRS/geotransform nor ground control "
+                "points, so it cannot be placed on a map. Sentinel-1 GRD products "
+                "normally include GCPs — if this one does not, it may be a partial "
+                "download or a non-standard export."
             ),
         )
 
@@ -161,7 +181,13 @@ async def ingest_sar(
         name=name,
         description=(
             f"Ingested Sentinel-1 product ({'dual-pol VV+VH' if sar.has_polarimetry else 'single-pol VV only'}), "
-            f"{sar.width}x{sar.height} px after decimation, CRS {sar.crs}."
+            f"{sar.width}x{sar.height} px after decimation, CRS {sar.crs}"
+            + (
+                ". Footprint approximated from ground control points (product is in "
+                "radar geometry, not terrain-corrected)."
+                if sar.georeferencing == "gcps"
+                else "."
+            )
         ),
         acquisition_time=acquisition_time or (dt.datetime.utcnow().isoformat() + "Z"),
         bbox=[round(v, 6) for v in sar.bbox],
@@ -199,7 +225,7 @@ def _suffix(filename: str | None) -> str:
     if not filename:
         return ".tif"
     suffix = Path(filename).suffix.lower()
-    return suffix if suffix in (".tif", ".tiff", ".img", ".vrt") else ".tif"
+    return suffix if suffix in (".tif", ".tiff", ".img", ".vrt", ".zip") else ".tif"
 
 
 async def _save_upload(upload: UploadFile, dest: Path) -> None:

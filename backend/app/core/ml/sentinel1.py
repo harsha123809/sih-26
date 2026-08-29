@@ -19,6 +19,7 @@ trained, and the API reports it as such rather than guessing.
 from __future__ import annotations
 
 import math
+import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -47,6 +48,9 @@ class SarScene:
     vh_db: np.ndarray | None = None
     ratio_db: np.ndarray | None = None
     stats: dict = field(default_factory=dict)
+    # "affine" (projected product), "gcps" (raw GRD in radar geometry, bbox
+    # approximated from ground control points), or "none".
+    georeferencing: str = "none"
 
 
 def _to_db(power: np.ndarray) -> np.ndarray:
@@ -91,6 +95,32 @@ def _decimated_shape(width: int, height: int, max_edge: int) -> tuple[int, int]:
     return max(int(height * scale), 1), max(int(width * scale), 1)
 
 
+def _bbox_from_gcps(gcps, gcp_crs) -> tuple[list[float], str] | None:
+    """Derive a WGS84 bbox from ground control points.
+
+    A Sentinel-1 GRD measurement TIFF straight out of a .SAFE package is in
+    radar geometry: it carries no CRS + affine transform, only a grid of GCPs.
+    Requiring a projected product would force every user through SNAP terrain
+    correction before they could load anything, so we take the GCP hull
+    instead. This is an approximate footprint, good enough to place the scene
+    on a map, and is NOT a substitute for real terrain correction if you need
+    per-pixel geolocation accuracy.
+    """
+    if not gcps:
+        return None
+
+    from rasterio.warp import transform as warp_transform
+
+    xs = [g.x for g in gcps]
+    ys = [g.y for g in gcps]
+
+    crs_name = str(gcp_crs) if gcp_crs else "EPSG:4326"
+    if gcp_crs is not None and str(gcp_crs).upper() not in ("EPSG:4326", "OGC:CRS84"):
+        xs, ys = warp_transform(gcp_crs, "EPSG:4326", xs, ys)
+
+    return [min(xs), min(ys), max(xs), max(ys)], crs_name
+
+
 def _read_band(path: str | Path, max_edge: int) -> tuple[np.ndarray, dict]:
     """Read band 1 of a raster, decimated to at most `max_edge` on its long
     side, along with the metadata needed to geolocate it."""
@@ -102,15 +132,24 @@ def _read_band(path: str | Path, max_edge: int) -> tuple[np.ndarray, dict]:
         data = src.read(1, out_shape=(out_h, out_w), masked=True)
         arr = np.ma.filled(data.astype(np.float64), np.nan)
 
-        if src.crs is not None:
+        georef = "none"
+        if src.crs is not None and not src.transform.is_identity:
             west, south, east, north = transform_bounds(
                 src.crs, "EPSG:4326", *src.bounds, densify_pts=21
             )
             crs_name = str(src.crs)
+            georef = "affine"
         else:
-            # Ungeoreferenced product — the caller has to supply a bbox.
-            west = south = east = north = float("nan")
-            crs_name = "UNKNOWN"
+            # No usable affine transform — fall back to GCPs, which is the
+            # normal case for an unprojected GRD product.
+            gcps, gcp_crs = src.gcps
+            from_gcps = _bbox_from_gcps(gcps, gcp_crs)
+            if from_gcps is not None:
+                (west, south, east, north), crs_name = from_gcps
+                georef = "gcps"
+            else:
+                west = south = east = north = float("nan")
+                crs_name = "UNKNOWN"
 
         meta = {
             "full_width": src.width,
@@ -119,8 +158,61 @@ def _read_band(path: str | Path, max_edge: int) -> tuple[np.ndarray, dict]:
             "read_height": out_h,
             "bbox": [west, south, east, north],
             "crs": crs_name,
+            "georeferencing": georef,
         }
     return arr, meta
+
+
+def extract_safe_zip(zip_path: str | Path, dest_dir: str | Path) -> dict:
+    """Pull the VV/VH measurement rasters out of a Sentinel-1 .SAFE.zip.
+
+    A product downloaded from the Copernicus Data Space arrives as a zip whose
+    measurement/ directory holds one GeoTIFF per polarisation, named like
+    s1a-iw-grd-vv-20260820t021400-...-001.tiff. Rather than make the user dig
+    those out by hand, find them by the -vv-/-vh- token in the filename.
+    """
+    import zipfile
+
+    zip_path = Path(zip_path)
+    dest_dir = Path(dest_dir)
+    dest_dir.mkdir(parents=True, exist_ok=True)
+
+    if not zipfile.is_zipfile(zip_path):
+        raise ValueError(f"{zip_path.name} is not a zip archive.")
+
+    with zipfile.ZipFile(zip_path) as zf:
+        members = [
+            n for n in zf.namelist()
+            if "/measurement/" in n.lower().replace("\\", "/")
+            and n.lower().endswith((".tiff", ".tif"))
+        ]
+        if not members:
+            raise ValueError(
+                "No measurement rasters found in this archive. Expected a "
+                "Sentinel-1 SAFE package containing measurement/*.tiff."
+            )
+
+        found: dict[str, str] = {}
+        for pol in ("vv", "vh"):
+            match = next((m for m in members if f"-{pol}-" in Path(m).name.lower()), None)
+            if match is None:
+                continue
+            # Flatten: write to dest_dir/<pol>.tiff rather than recreating the
+            # SAFE tree, and never trust archive paths (zip-slip).
+            out = dest_dir / f"{pol}.tiff"
+            with zf.open(match) as src, out.open("wb") as dst:
+                shutil.copyfileobj(src, dst, length=4 * 1024 * 1024)
+            found[pol] = str(out)
+
+        if "vv" not in found:
+            # Single-pol products exist that are HH/HV rather than VV/VH.
+            available = sorted({Path(m).name for m in members})[:5]
+            raise ValueError(
+                "No VV measurement band found in this archive. MFOSIS needs VV "
+                f"(co-polarised) at minimum. Files present: {', '.join(available)}"
+            )
+
+    return found
 
 
 def load_sar_scene(
@@ -179,6 +271,7 @@ def load_sar_scene(
         vh_db=vh_db,
         ratio_db=ratio_db,
         stats=stats,
+        georeferencing=meta["georeferencing"],
     )
 
 
