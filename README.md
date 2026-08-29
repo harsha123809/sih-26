@@ -59,19 +59,35 @@ frontend/src/
 
 ## Running it
 
+First-time setup (once):
+
 **Backend**
 ```
 cd backend
-python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-uvicorn app.main:app --reload --port 8000
+python3 -m venv .venv && source .venv/bin/activate   # Windows: py -3.11 -m venv .venv
+pip install -r requirements.txt                      #          .\.venv\Scripts\Activate.ps1
 ```
 
 **Frontend**
 ```
 cd frontend
 npm install
-npm run dev
+```
+
+Python 3.11 is the safe choice — 3.13+ has no prebuilt wheels for the pinned
+numpy/torch versions and pip will try (and fail) to compile them from source.
+
+Then, to run both servers:
+
+**Windows** — one command, opens each server in its own titled window:
+```
+.\start.ps1
+```
+
+**macOS/Linux** — two terminals:
+```
+cd backend && source .venv/bin/activate && uvicorn app.main:app --reload --port 8000
+cd frontend && npm run dev
 ```
 
 The Vite dev server proxies `/api` to `localhost:8000`, so open the printed
