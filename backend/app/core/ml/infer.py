@@ -34,6 +34,51 @@ _SCENARIO_PROFILES: dict[str, tuple[OilClass, float, tuple[float, float]]] = {
 }
 
 
+def _unclassified_real_scene(
+    scene_id: str,
+    env: EnvironmentalConditions,
+    bbox: list[float],
+    sar_stats: dict | None,
+) -> dict:
+    """A real ingested product, with no trained model to classify it.
+
+    Everything here is either measured or honestly absent. There is no
+    segmentation polygon because segmentation is exactly what the untrained
+    model would have produced, and no class probabilities because inventing
+    them is the specific failure this whole system is built to avoid.
+    """
+    west, south, east, north = bbox
+    centroid = [(west + east) / 2, (south + north) / 2]
+
+    ratio_stats = (sar_stats or {}).get("ratio_db")
+    has_polarimetry = ratio_stats is not None
+    measured_ratio = round(float(ratio_stats["median"]), 2) if ratio_stats else 0.0
+
+    # The physics gate still applies: it is a function of sea state, not of
+    # the model, so its verdict is just as valid on real data.
+    reliability = evaluate_physics_gate(env, 0.0)
+
+    return {
+        "predicted_class": OilClass.UNRESOLVED,
+        "class_probabilities": ClassProbabilities(),
+        "polygon": {"type": "Polygon", "coordinates": []},
+        "area_m2": 0.0,
+        "centroid": centroid,
+        "vv_vh_ratio_db": measured_ratio,
+        "reliability": reliability,
+        "has_polarimetry": has_polarimetry,
+        "simulation_mode": SIMULATION_MODE,
+        "classification_available": False,
+        "classification_note": (
+            "This is a real SAR product, so there is no seeded scenario to draw a "
+            "demo classification from — and no trained checkpoint to compute a real "
+            "one. Geometry, geolocation and the VV/VH ratio below are measured from "
+            "the actual pixels; oil type is reported as UNRESOLVED rather than "
+            "guessed. Train the model and set SIMULATION_MODE=False to classify."
+        ),
+    }
+
+
 def _seeded_rng(scene_id: str) -> random.Random:
     seed = int(hashlib.sha256(scene_id.encode()).hexdigest(), 16) % (2**32)
     return random.Random(seed)
@@ -68,11 +113,22 @@ def run_inference(
     scenario_tag: str,
     env: EnvironmentalConditions,
     bbox: list[float],
+    is_real_sar: bool = False,
+    sar_stats: dict | None = None,
 ) -> dict:
     """Returns a dict with predicted_class, class_probabilities, polygon,
     area_m2, centroid, vv_vh_ratio_db, reliability (ReliabilityBlock),
     has_polarimetry, simulation_mode.
+
+    For an ingested real SAR product there is no scenario tag to draw a
+    scripted answer from, and no trained checkpoint to compute a real one.
+    Rather than emit a confident-looking fabrication, such scenes return
+    UNRESOLVED with classification_available=False. The measured VV/VH ratio
+    IS reported, because that part is a real measurement off real pixels.
     """
+    if is_real_sar and SIMULATION_MODE:
+        return _unclassified_real_scene(scene_id, env, bbox, sar_stats)
+
     rng = _seeded_rng(scene_id)
     dominant, base_prob, ratio_range = _SCENARIO_PROFILES.get(
         scenario_tag, (OilClass.OPEN_WATER, 0.9, (0.0, 1.0))
@@ -132,4 +188,6 @@ def run_inference(
         "reliability": reliability,
         "has_polarimetry": has_polarimetry,
         "simulation_mode": SIMULATION_MODE,
+        "classification_available": True,
+        "classification_note": None,
     }

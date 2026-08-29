@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 import datetime as dt
+import math
+import shutil
 import uuid
+from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, Query, Response
+from fastapi import APIRouter, File, Form, HTTPException, Query, Response, UploadFile
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from app.api.evidence_export import build_evidence_bundle, build_evidence_pdf
@@ -79,13 +83,130 @@ def list_scenes():
 
 @router.post("/scenes/ingest", response_model=Scene)
 def ingest_scene(scene: Scene):
-    # In-memory demo ingestion: append if not already present.
+    # Metadata-only ingestion (no raster). For a real product, use
+    # POST /api/scenes/ingest-sar instead.
     existing = store.get_scene(scene.id)
     if existing:
         raise HTTPException(status_code=409, detail=f"Scene {scene.id} already exists")
-    from app.data.seed import SCENES
-    SCENES.append(scene)
+    store.add_scene(scene)
     return scene
+
+
+SAR_DATA_DIR = Path(__file__).resolve().parents[2] / "data" / "sar"
+
+
+@router.post("/scenes/ingest-sar", response_model=Scene)
+async def ingest_sar(
+    vv_file: UploadFile = File(..., description="Sentinel-1 GRD VV band (GeoTIFF)"),
+    vh_file: UploadFile | None = File(None, description="Optional VH band (GeoTIFF)"),
+    name: str = Form("Ingested SAR Scene"),
+    acquisition_time: str | None = Form(None),
+    wind_speed_ms: float = Form(...),
+    wind_dir_deg: float = Form(0.0),
+    sea_surface_temp_c: float = Form(28.0),
+    incidence_angle_deg: float = Form(33.0),
+    wave_height_m: float = Form(1.0),
+    precipitation_mm_hr: float = Form(0.0),
+):
+    """Ingest a real Sentinel-1 GRD product.
+
+    Wind speed is required, not optional: without it the physics gate cannot
+    say whether a detection over this scene would be trustworthy, and an
+    ungated detection is exactly what this system exists to avoid producing.
+    Get it from ERA5/GFS reanalysis for the acquisition timestamp.
+    """
+    from app.core.ml.sentinel1 import load_sar_scene, render_thumbnail
+
+    scene_id = f"sar-{uuid.uuid4().hex[:10]}"
+    scene_dir = SAR_DATA_DIR / scene_id
+    scene_dir.mkdir(parents=True, exist_ok=True)
+
+    saved: list[str] = []
+    try:
+        vv_path = scene_dir / f"vv{_suffix(vv_file.filename)}"
+        await _save_upload(vv_file, vv_path)
+        saved.append(str(vv_path))
+
+        vh_path = None
+        if vh_file is not None and vh_file.filename:
+            vh_path = scene_dir / f"vh{_suffix(vh_file.filename)}"
+            await _save_upload(vh_file, vh_path)
+            saved.append(str(vh_path))
+
+        sar = load_sar_scene(vv_path, vh_path)
+    except ValueError as exc:
+        shutil.rmtree(scene_dir, ignore_errors=True)
+        raise HTTPException(status_code=422, detail=str(exc))
+    except Exception as exc:
+        shutil.rmtree(scene_dir, ignore_errors=True)
+        raise HTTPException(
+            status_code=422,
+            detail=f"Could not read this as a geospatial raster: {exc}",
+        )
+
+    if not all(math.isfinite(v) for v in sar.bbox):
+        shutil.rmtree(scene_dir, ignore_errors=True)
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "Product has no usable CRS/geotransform, so it cannot be placed on "
+                "the map. Use a georeferenced (terrain-corrected) GRD product."
+            ),
+        )
+
+    render_thumbnail(sar, scene_dir / "thumbnail.png")
+
+    scene = Scene(
+        id=scene_id,
+        name=name,
+        description=(
+            f"Ingested Sentinel-1 product ({'dual-pol VV+VH' if sar.has_polarimetry else 'single-pol VV only'}), "
+            f"{sar.width}x{sar.height} px after decimation, CRS {sar.crs}."
+        ),
+        acquisition_time=acquisition_time or (dt.datetime.utcnow().isoformat() + "Z"),
+        bbox=[round(v, 6) for v in sar.bbox],
+        thumbnail_url=f"/api/scenes/{scene_id}/thumbnail",
+        environment=EnvironmentalConditions(
+            wind_speed_ms=wind_speed_ms,
+            wind_dir_deg=wind_dir_deg,
+            sea_surface_temp_c=sea_surface_temp_c,
+            incidence_angle_deg=incidence_angle_deg,
+            wave_height_m=wave_height_m,
+            precipitation_mm_hr=precipitation_mm_hr,
+            has_polarimetry=sar.has_polarimetry,
+        ),
+        scenario_tag="ingested_real_sar",
+        is_real_sar=True,
+        sar_stats=sar.stats,
+        source_files=saved,
+    )
+    store.add_scene(scene)
+    return scene
+
+
+@router.get("/scenes/{scene_id}/thumbnail")
+def scene_thumbnail(scene_id: str):
+    scene = store.get_scene(scene_id)
+    if scene is None:
+        raise HTTPException(status_code=404, detail="Scene not found")
+    path = SAR_DATA_DIR / scene_id / "thumbnail.png"
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="No thumbnail for this scene")
+    return FileResponse(path, media_type="image/png")
+
+
+def _suffix(filename: str | None) -> str:
+    if not filename:
+        return ".tif"
+    suffix = Path(filename).suffix.lower()
+    return suffix if suffix in (".tif", ".tiff", ".img", ".vrt") else ".tif"
+
+
+async def _save_upload(upload: UploadFile, dest: Path) -> None:
+    """Stream to disk in chunks — GRD products run to several GB."""
+    with dest.open("wb") as fh:
+        while chunk := await upload.read(1024 * 1024):
+            fh.write(chunk)
 
 
 class AnalyseRequest(BaseModel):
@@ -103,9 +224,14 @@ def analyse_scene(scene_id: str, req: AnalyseRequest = AnalyseRequest()):
     if req.force_wind_speed_ms is not None:
         env = env.model_copy(update={"wind_speed_ms": req.force_wind_speed_ms})
 
-    result = run_inference(scene.id, scene.scenario_tag, env, scene.bbox)
+    result = run_inference(
+        scene.id, scene.scenario_tag, env, scene.bbox,
+        is_real_sar=scene.is_real_sar, sar_stats=scene.sar_stats,
+    )
 
-    if not req.apply_physics_gate:
+    # Turning the gate off shows raw model output; it cannot conjure a
+    # classification where none exists, so a real SAR scene stays UNRESOLVED.
+    if not req.apply_physics_gate and not scene.is_real_sar:
         # Raw, unfiltered model output — the UI must show a warning banner
         # alongside this. We recompute probabilities without the gate's
         # confidence multiplier by re-running with an always-optimal gate
@@ -129,6 +255,8 @@ def analyse_scene(scene_id: str, req: AnalyseRequest = AnalyseRequest()):
         vv_vh_ratio_db=result["vv_vh_ratio_db"],
         simulation_mode=result["simulation_mode"],
         timestamp=scene.acquisition_time,
+        classification_available=result.get("classification_available", True),
+        classification_note=result.get("classification_note"),
     )
     store.save_detection(detection)
 

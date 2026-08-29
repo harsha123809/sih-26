@@ -19,3 +19,7 @@ dist/
 
 # Logs
 *.log
+
+# Ingested SAR products and their generated thumbnails — GRD files run to
+# several GB and are reproducible from the source product.
+backend/data/sar/

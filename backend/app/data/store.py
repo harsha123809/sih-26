@@ -10,12 +10,21 @@ _detections: dict[str, Detection] = {}
 _incidents: dict[str, Incident] = {}
 
 
+_ingested_scenes: list[Scene] = []
+
+
 def list_scenes() -> list[Scene]:
-    return list(SCENES)
+    """Seeded demo scenes plus anything ingested this session. Ingested
+    scenes come first so a freshly uploaded product is easy to find."""
+    return list(_ingested_scenes) + list(SCENES)
 
 
 def get_scene(scene_id: str) -> Scene | None:
-    return next((s for s in SCENES if s.id == scene_id), None)
+    return next((s for s in list_scenes() if s.id == scene_id), None)
+
+
+def add_scene(scene: Scene) -> None:
+    _ingested_scenes.insert(0, scene)
 
 
 def list_vessels() -> list[VesselProfile]:

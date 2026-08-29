@@ -59,6 +59,9 @@ export interface Scene {
   thumbnail_url: string | null;
   environment: EnvironmentalConditions;
   scenario_tag: string;
+  is_real_sar: boolean;
+  sar_stats: Record<string, { min: number; max: number; mean: number; p2: number; median: number; p98: number } | null> | null;
+  source_files: string[];
 }
 
 export interface VesselProfile {
@@ -110,6 +113,8 @@ export interface Detection {
   vv_vh_ratio_db: number;
   simulation_mode: boolean;
   timestamp: string;
+  classification_available: boolean;
+  classification_note: string | null;
 }
 
 export interface DriftConeFrame {

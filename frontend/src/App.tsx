@@ -336,6 +336,11 @@ export default function App() {
               setSelectedSceneId(id);
               setView("map");
             }}
+            onIngested={(scene) => {
+              setScenes((prev) => [scene, ...prev]);
+              setSelectedSceneId(scene.id);
+              setView("map");
+            }}
           />
         )}
 

@@ -38,6 +38,22 @@ export const api = {
       }),
     }),
 
+  ingestSar: async (form: FormData): Promise<Scene> => {
+    // No Content-Type header here on purpose — the browser must set the
+    // multipart boundary itself.
+    const res = await fetch(`${BASE}/scenes/ingest-sar`, { method: "POST", body: form });
+    if (!res.ok) {
+      let detail = await res.text();
+      try {
+        detail = JSON.parse(detail).detail ?? detail;
+      } catch {
+        /* not JSON, use the raw body */
+      }
+      throw new Error(detail);
+    }
+    return res.json() as Promise<Scene>;
+  },
+
   sceneTruthGap: (sceneId: string) =>
     req<VesselTruthGapResult[]>(`/scenes/${sceneId}/truth-gap`),
 

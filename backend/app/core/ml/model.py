@@ -28,6 +28,14 @@ NUM_CLASSES = 6
 CLASS_NAMES = ["open_water", "crude_oil", "heavy_fuel_oil", "look_alike", "ship", "land"]
 CONTEXT_DIM = 7  # [wind_speed, wind_dir_sin, wind_dir_cos, sst, incidence_angle, wave_height, has_polarimetry]
 
+# Fill value for the VH and VV/VH channels when a product carries no
+# cross-polarisation band. Deliberately far outside the range real sigma0 dB
+# ever takes (roughly -40..+5), so the network can learn "this channel is
+# absent" as a distinct state rather than confusing it for a real weak return.
+# Paired with has_polarimetry=0 in the context vector, and with the API
+# reporting oil type as UNRESOLVED — never a guess between crude and HFO.
+VH_SENTINEL_VALUE = -99.0
+
 
 class ConvBlock(nn.Module):
     def __init__(self, in_ch: int, out_ch: int):

@@ -68,9 +68,25 @@ export function EvidencePanel({
               {detection.centroid[1].toFixed(4)}, {detection.centroid[0].toFixed(4)}
             </span>
           </Row>
-          <div className="mt-2 aspect-video w-full rounded-input border border-border bg-elevated/60 bg-[repeating-linear-gradient(45deg,rgba(255,255,255,0.02)_0px,rgba(255,255,255,0.02)_2px,transparent_2px,transparent_10px)] flex items-center justify-center text-xs2 text-text-secondary">
-            SAR thumbnail unavailable — simulation mode
-          </div>
+          {scene.thumbnail_url ? (
+            <figure className="mt-2">
+              <img
+                src={scene.thumbnail_url}
+                alt={`SAR backscatter thumbnail for ${scene.name}`}
+                className="w-full rounded-input border border-border bg-black"
+                loading="lazy"
+              />
+              <figcaption className="mt-1 text-[10px] leading-relaxed text-text-secondary">
+                VV backscatter, contrast-stretched to the 2nd–98th percentile for legibility.
+                Dark regions are low backscatter (possible surface damping); bright points are
+                hard targets such as vessels.
+              </figcaption>
+            </figure>
+          ) : (
+            <div className="mt-2 aspect-video w-full rounded-input border border-border bg-elevated/60 bg-[repeating-linear-gradient(45deg,rgba(255,255,255,0.02)_0px,rgba(255,255,255,0.02)_2px,transparent_2px,transparent_10px)] flex items-center justify-center px-4 text-center text-xs2 text-text-secondary">
+              No SAR imagery for this scene — seeded demo fixture, metadata only.
+            </div>
+          )}
         </Stage>
 
         {/* 2. Classification */}
@@ -84,20 +100,29 @@ export function EvidencePanel({
               VH channel unavailable — oil type reported as UNRESOLVED rather than guessed.
             </div>
           )}
-          <div className="flex flex-col gap-1.5">
-            {Object.entries(detection.class_probabilities).map(([cls, p]) => (
-              <div key={cls} className="flex items-center gap-2">
-                <span className="w-24 flex-shrink-0 text-xs2 text-text-secondary">{OIL_LABELS[cls as keyof typeof OIL_LABELS]}</span>
-                <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-elevated">
-                  <div
-                    className="h-full rounded-full"
-                    style={{ width: `${p * 100}%`, backgroundColor: OIL_COLORS[cls as keyof typeof OIL_COLORS] }}
-                  />
+          {detection.classification_available ? (
+            <div className="flex flex-col gap-1.5">
+              {Object.entries(detection.class_probabilities).map(([cls, p]) => (
+                <div key={cls} className="flex items-center gap-2">
+                  <span className="w-24 flex-shrink-0 text-xs2 text-text-secondary">{OIL_LABELS[cls as keyof typeof OIL_LABELS]}</span>
+                  <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-elevated">
+                    <div
+                      className="h-full rounded-full"
+                      style={{ width: `${p * 100}%`, backgroundColor: OIL_COLORS[cls as keyof typeof OIL_COLORS] }}
+                    />
+                  </div>
+                  <span className="mono-num w-10 text-right text-xs2">{(p * 100).toFixed(0)}%</span>
                 </div>
-                <span className="mono-num w-10 text-right text-xs2">{(p * 100).toFixed(0)}%</span>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          ) : (
+            // Real imagery, untrained model: probability bars would all be
+            // zero and imply a measurement that was never made. Say so instead.
+            <div className="rounded-input border border-amber/30 bg-amber/10 px-2.5 py-2 text-xs2 leading-relaxed text-amber">
+              {detection.classification_note ??
+                "Classification unavailable for this scene."}
+            </div>
+          )}
           <Row label="VV/VH ratio">
             <span className="mono-num">{detection.has_polarimetry ? `${detection.vv_vh_ratio_db.toFixed(2)} dB` : "—"}</span>
           </Row>

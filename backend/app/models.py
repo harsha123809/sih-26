@@ -74,6 +74,13 @@ class Scene(BaseModel):
     thumbnail_url: Optional[str] = None
     environment: EnvironmentalConditions
     scenario_tag: str
+    # True when this scene came from an actual ingested SAR product rather
+    # than the seeded demo fixtures. Real scenes have genuine geometry and
+    # measured backscatter, but classification still requires trained weights
+    # — so they report UNRESOLVED rather than a scripted answer.
+    is_real_sar: bool = False
+    sar_stats: Optional[dict] = None
+    source_files: list[str] = Field(default_factory=list)
 
 
 class VesselProfile(BaseModel):
@@ -125,6 +132,11 @@ class Detection(BaseModel):
     vv_vh_ratio_db: float
     simulation_mode: bool = True
     timestamp: str
+    # False on real ingested SAR, where no trained model exists to classify
+    # with. The UI surfaces classification_note verbatim in that case instead
+    # of rendering meaningless probability bars.
+    classification_available: bool = True
+    classification_note: Optional[str] = None
 
 
 class DriftConeFrame(BaseModel):

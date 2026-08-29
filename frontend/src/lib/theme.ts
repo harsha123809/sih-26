@@ -17,7 +17,10 @@ export const OIL_LABELS: Record<OilClass, string> = {
   look_alike: "Look-alike",
   ship: "Ship",
   land: "Land",
-  unresolved: "Unresolved (No Polarimetry)",
+  // "Unresolved" covers two distinct causes — no VH band, or no trained
+  // model — so the label stays neutral and the Classification stage explains
+  // which one applies.
+  unresolved: "Unresolved",
 };
 
 export const VERDICT_META: Record<

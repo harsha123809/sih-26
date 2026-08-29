@@ -115,6 +115,39 @@ the map uses CARTO's free dark basemap tiles, not Mapbox.
   channel unavailable), the API reports oil type as `UNRESOLVED` rather than
   guessing crude vs. HFO from VV alone.
 
+## Ingesting real Sentinel-1 data
+
+The six seeded scenes are metadata-only fixtures with no imagery behind them.
+To run the pipeline on actual satellite data:
+
+1. Register free at the [Copernicus Data Space Ecosystem](https://dataspace.copernicus.eu/)
+   and download a **Sentinel-1 GRD** product over your area of interest.
+2. Extract the VV (and ideally VH) measurement bands as georeferenced GeoTIFFs.
+   Analysis-ready output from SNAP or pyroSAR works directly; so does a raw
+   GRD measurement TIFF, though without the calibration LUT its absolute
+   backscatter level is not physically meaningful.
+3. In the app, go to **Scenes → Ingest SAR**, attach the bands, and give it the
+   wind speed at acquisition time (from ERA5 or GFS reanalysis).
+
+Or via the API:
+
+```
+curl -X POST http://127.0.0.1:8000/api/scenes/ingest-sar \
+  -F "vv_file=@S1A_..._vv.tif" \
+  -F "vh_file=@S1A_..._vh.tif" \
+  -F "wind_speed_ms=6.2" \
+  -F "incidence_angle_deg=34.0"
+```
+
+**Wind speed is required, not optional.** Without it the physics gate cannot
+judge whether a detection over that scene is trustworthy, and an ungated
+detection is the exact failure mode this system exists to prevent.
+
+What you get from a real product today: genuine geometry and geolocation, a
+real contrast-stretched SAR thumbnail in the evidence panel, the measured
+VV/VH ratio, and a real physics-gate verdict. What you do **not** get is
+classification — see below.
+
 ## SIMULATION_MODE — read this before judging the numbers
 
 **No trained checkpoint is loaded.** No GPU or labelled training corpus was
@@ -131,6 +164,15 @@ run, so the frontend shows `--` rather than a fabricated number.
 To go live: point `MODEL_WEIGHTS_PATH` at a trained checkpoint and flip
 `SIMULATION_MODE = False` in `infer.py`. No other code changes are required
 — the API contract, physics gate, and attribution engine are unchanged.
+
+**On an ingested real product, nothing is scripted and nothing is invented.**
+There is no scenario tag to look up and no checkpoint to infer with, so such
+scenes return `predicted_class: UNRESOLVED` with
+`classification_available: false` and a note explaining why. The UI shows that
+note in place of probability bars rather than rendering six zeroed-out bars
+that imply a measurement nobody made. The measured VV/VH ratio and the
+physics-gate verdict *are* shown, because those are computed from real pixels
+and real sea-state data respectively.
 
 ## The physics gate
 
