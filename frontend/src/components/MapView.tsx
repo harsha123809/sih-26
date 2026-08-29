@@ -10,25 +10,36 @@ import type {
 } from "../types/api";
 import { OIL_COLORS } from "../lib/theme";
 
+// Esri's public "World Dark Gray" canvas — free, no API key, no rate-limit
+// gate (unlike CARTO's basemaps.cartocdn.com, which now requires a paid key).
+// Note the tile path is {z}/{y}/{x}, NOT the usual {z}/{x}/{y} — that's Esri's
+// REST tile convention, not a typo.
 const DARK_STYLE: maplibregl.StyleSpecification = {
   version: 8,
   sources: {
-    carto_dark: {
+    esri_dark_base: {
       type: "raster",
       tiles: [
-        "https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png",
-        "https://b.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png",
-        "https://c.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png",
-        "https://d.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png",
+        "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}",
       ],
       tileSize: 256,
+      maxzoom: 16,
       attribution:
-        '© <a href="https://www.openstreetmap.org/copyright" target="_blank">OpenStreetMap</a> contributors © <a href="https://carto.com/attributions" target="_blank">CARTO</a>',
+        '© <a href="https://www.esri.com" target="_blank">Esri</a> — Esri, HERE, Garmin, © OpenStreetMap contributors',
+    },
+    esri_dark_labels: {
+      type: "raster",
+      tiles: [
+        "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}",
+      ],
+      tileSize: 256,
+      maxzoom: 16,
     },
   },
   layers: [
     { id: "bg", type: "background", paint: { "background-color": "#0A0E14" } },
-    { id: "carto_dark_layer", type: "raster", source: "carto_dark", paint: { "raster-opacity": 0.85, "raster-brightness-max": 0.55 } },
+    { id: "esri_dark_base_layer", type: "raster", source: "esri_dark_base", paint: { "raster-opacity": 0.9 } },
+    { id: "esri_dark_labels_layer", type: "raster", source: "esri_dark_labels", paint: { "raster-opacity": 0.8 } },
   ],
 };
 
