@@ -1,0 +1,73 @@
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap");
+@import "maplibre-gl/dist/maplibre-gl.css";
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+  body {
+    @apply bg-bg text-text-primary font-sans antialiased;
+  }
+  ::selection {
+    @apply bg-teal/30 text-text-primary;
+  }
+  :focus-visible {
+    outline: 2px solid #34d3c4;
+    outline-offset: 2px;
+  }
+}
+
+@layer utilities {
+  .label-caps {
+    @apply text-[11px] uppercase tracking-[0.08em] text-text-secondary;
+  }
+  .mono-num {
+    @apply font-mono tabular-nums;
+  }
+  .scrollbar-thin::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    background: #232d3b;
+    border-radius: 4px;
+  }
+  .scrollbar-thin::-webkit-scrollbar-track {
+    background: transparent;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+.maplibregl-popup-content {
+  background: #18202c !important;
+  color: #e4e9f0 !important;
+  border: 1px solid #232d3b !important;
+  border-radius: 6px !important;
+  font-family: "Inter", sans-serif !important;
+  font-size: 12px !important;
+}
+.maplibregl-popup-tip {
+  border-top-color: #18202c !important;
+  border-bottom-color: #18202c !important;
+}
+.maplibregl-ctrl-attrib {
+  background: rgba(10, 14, 20, 0.7) !important;
+}
+.maplibregl-ctrl-attrib a {
+  color: #8a97a8 !important;
+}
